@@ -178,7 +178,7 @@ def plot_comparison_generic(results):
 
     for name, res in results.items():
         metrics = compute_convergence_metrics(res['rewards'], THRESHOLDS.get(name, 0))
-        eval_stats = evaluate_policy_performance(res['policy_net'], name)
+        eval_stats = evaluate_policy_performance(res['actor'], name)
         
         conv_ep = metrics['convergence_episode']
         conv_str = str(conv_ep) if conv_ep else "> Max"
@@ -186,7 +186,7 @@ def plot_comparison_generic(results):
         table_data.append([
             name,
             conv_str,
-            f"{res['training_time']:.1f}",
+            f"{res['time']:.1f}",
             f"{eval_stats['mean_reward']:.1f} ± {eval_stats['std_reward']:.1f}"
         ])
 
@@ -216,3 +216,115 @@ def load_models(name, actor, critic):
         print(f"Loaded existing models for {name}. Skipping training.")
         return True
     return False
+
+import pandas as pd
+import numpy as np
+
+def print_statistics(results_dict, env_configs):
+    stats_data = []
+
+    for env_name, data in results_dict.items():
+        rewards = data['rewards']
+        lengths = data['lengths']
+        total_time = data['time']
+        
+        # Get config for this env
+        config = env_configs[env_name]
+        solved_score = config['solved_score']
+        
+        # 1. Calculate Moving Average
+        window = 50
+        moving_avgs = pd.Series(rewards).rolling(window=window).mean()
+        
+        # 2. Find Convergence Point
+        # Find the first index where the moving average crosses the solved score
+        convergence_indices = np.where(moving_avgs >= solved_score)[0]
+        
+        if len(convergence_indices) > 0:
+            conv_ep = convergence_indices[0]
+            # Estimate time to convergence (assuming linear time distribution)
+            # (Time per episode * convergence episode)
+            avg_time_per_ep = total_time / len(rewards)
+            conv_time = avg_time_per_ep * conv_ep
+            status = "Solved"
+        else:
+            conv_ep = len(rewards) # Did not converge
+            conv_time = total_time
+            status = "Not Solved"
+
+        # 3. Calculate Total Steps (Sample Efficiency)
+        # Sum of lengths up to the convergence point
+        steps_to_solve = sum(lengths[:conv_ep])
+
+        stats_data.append({
+            "Environment": env_name,
+            "Status": status,
+            "Conv. Episode": conv_ep,
+            "Conv. Time (s)": round(conv_time, 2),
+            "Steps to Solve": steps_to_solve,
+            "Final Avg Score": round(moving_avgs.iloc[-1], 2) if len(moving_avgs) > 0 else 0,
+            "Std Dev (Last 50)": round(np.std(rewards[-50:]), 2)
+        })
+
+    # Create DataFrame for clean display
+    df = pd.DataFrame(stats_data)
+    
+    print("\n" + "="*60)
+    print(f"{'FINAL PERFORMANCE STATISTICS':^60}")
+    print("="*60)
+    print(df.to_string(index=False))
+    print("="*60)
+
+def plot_training_results(env_name, rewards, config, window=50, save_dir="training_plots"):
+    """
+    Generates and saves a plot of reward history for a single environment.
+    - Raw rewards are faint background lines.
+    - Moving average is a thick, solid line representing the trend.
+    - Solved threshold is a red dashed line.
+    """
+    # Ensure plot directory exists
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Convert list to pandas Series for easy rolling average
+    reward_series = pd.Series(rewards)
+    # Calculate moving average (min_periods=1 ensures line starts immediately)
+    moving_avg = reward_series.rolling(window=window, min_periods=1).mean()
+    
+    solved_score = config['solved_score']
+    episodes = np.arange(1, len(rewards) + 1)
+
+    # --- Plotting Setup ---
+    plt.figure(figsize=(10, 6)) # Standard landscape aspect ratio
+    
+    # 1. Plot Raw Data (Faint, noisy background signal)
+    plt.plot(episodes, rewards, 
+             color='tab:blue', alpha=0.2, linewidth=1.0, zorder=1, 
+             label='Raw Episode Reward')
+    
+    # 2. Plot Moving Average (Strong, clear trend signal)
+    plt.plot(episodes, moving_avg, 
+             color='tab:blue', linewidth=2.5, zorder=2, 
+             label=f'{window}-Episode Moving Avg')
+    
+    # 3. Plot Goal Threshold (Red dashed line)
+    plt.axhline(y=solved_score, color='tab:red', linestyle='--', linewidth=2, zorder=3,
+                label=f'Solved Threshold ({solved_score})')
+
+    # --- Aesthetics & Labels ---
+    plt.title(f"Training Convergence: {env_name}", fontsize=14, fontweight='bold')
+    plt.xlabel("Episode", fontsize=12)
+    plt.ylabel("Total Reward", fontsize=12)
+    plt.grid(True, linestyle=':', alpha=0.6)
+    plt.legend(loc='best', frameon=True, shadow=True)
+    
+    # Ensure tight layout so labels aren't cut off
+    plt.tight_layout()
+    
+    # Construct filename and save
+    safe_name = env_name.replace("-", "_")
+    filepath = os.path.join(save_dir, f"{safe_name}_convergence.png")
+    plt.savefig(filepath, dpi=150) # dpi=150 is good for documents
+    print(f"Plot saved to: {filepath}")
+    
+    # Close plot to free memory (crucial if running many in a loop)
+    plt.close()
