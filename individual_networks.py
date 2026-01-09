@@ -41,14 +41,14 @@ ENV_CONFIGS = {
         "reward_scale": 1
     },
     MOUNTAIN_CART: {
-        "lr_actor": 5e-4,       # Medium speed
-        "lr_critic": 2e-3,
-        "entropy_start": 0.5,   # HIGH exploration needed initially
-        "entropy_decay": 0.998, # Very slow decay to find the swing
+        "lr_actor": 1e-3,       # Medium speed
+        "lr_critic": 1e-3,
+        "entropy_start": 1.0,   # HIGH exploration needed initially
+        "entropy_decay": 0.995, # Very slow decay to find the swing
         "entropy_end": 0.001,
         "max_episodes": 2000,
         "solved_score": 90,
-        "precision_trigger": 85, # When to switch to "Pro Mode"
+        "precision_trigger": 50, # When to switch to "Pro Mode"
         "reward_scale": 1.0     # Complex shaping used instead
     }
 }
@@ -105,9 +105,9 @@ def get_shaped_reward(env_name, raw_reward, state, next_state, config):
     if env_name == MOUNTAIN_CART:
         # Encourages swinging and climbing
         pos, vel = next_state[0], next_state[1]
-        shaped = raw_reward + (abs(vel) * 10.0)
-        if pos > -0.5: shaped += (pos + 0.5) * 2.0
-        if raw_reward > 40: shaped += 50.0
+        shaped = raw_reward + (abs(vel) * 3.0)
+        if pos > -0.5: shaped += (pos + 0.2) * 5.0
+        if raw_reward > 50: shaped += 100.0
         return shaped
     elif env_name == ACROBOT:
         # Acrobot State: [cos(theta1), sin(theta1), cos(theta2), sin(theta2), vel1, vel2]
@@ -469,5 +469,5 @@ def train_agent_batch(env_name="CartPole-v1"):
 if __name__ == "__main__":
     # Test run
     # train_agent_batch(CART_POLE)
-    train_agent_batch(ACROBOT)
+    # train_agent_batch(ACROBOT)
     train_agent_batch(MOUNTAIN_CART)
